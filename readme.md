@@ -33,10 +33,10 @@ Ce projet se base sur la documentation officielle de Lua 5.3 :
 
 ## ⚙️ Compilation
 
-### Avec `make`
+### Avec `dune`
 
 ```bash
-make && ./bin/main
+dune build && ./_build/default/main.exe test.lua
 ```
 
 ## 📝 Licence
