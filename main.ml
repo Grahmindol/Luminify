@@ -7,5 +7,5 @@ let () =
   );
   let filename = Sys.argv.(1) in
   let content = In_channel.with_open_bin filename In_channel.input_all in
-  let tokens = Lib.Lexer.tokenize content in
-  List.iter print_endline tokens
+  let chunk = Lib.Lexer.parse content in
+  print_endline (Lib.Lexer.unparse chunk)
