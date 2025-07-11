@@ -1,8 +1,8 @@
 (* lexer.ml *)
 
-type name = string
-type numeral = float
-type literalstring = string
+type name = string;;
+type numeral = float;;
+type literalstring = string;;
 
 type token = 
   | Whitespace of string (* Spaces, newlines, tabs, and carriage returns *)
@@ -18,7 +18,7 @@ type token =
   | VarArg (* the '...' *)
   | Operator of string (* Operators, like +, -, %, =, ==, >=, <=, ~=, etc *)
   | LabelStart | LabelEnd (* The starts and ends of labels.  Between them there can only be whitespace and an ident tokens.*)
-  | UnIdentified of string (* Anything that isn't one of the above tokens. Consider them errors. Invalid escapes are also unidentified. *)
+  | UnIdentified of string;; (* Anything that isn't one of the above tokens. Consider them errors. Invalid escapes are also unidentified. *)
 
 type chunk = block
 and block = stat list * retstat option 
@@ -83,9 +83,89 @@ and binop = Add | Sub | Mul | Div | FloorDiv | Pow | Mod
           | Band | Bxor | Bor | Shr | Shl | Concat
           | Lt | Le | Gt | Ge | Eq | Ne
           | And | Or
-and unop = Neg | Not | Len | Bnot
+and unop = Neg | Not | Len | Bnot;;
+
+let is_whitespace = function
+  | ' ' | '\n' | '\t' | '\r' -> true
+  | _ -> false
+
+let is_symbol = function
+  | ',' | '{' | '}' | '[' | ']' | '(' | ')' | ';' | '.' | ':' | '='
+  | '~' | '&' | '|' | '#' | '>' | '<' 
+  | '+' | '-' | '*' | '/' | '^' | '%' -> true
+  | _ -> false
+
+let is_keyword = function 
+| "break" | "do" | "else" | "elseif" | "end"
+| "for" | "function" | "goto" | "if" | "in"
+| "local" | "repeat" | "return"
+| "then" | "until" | "while" -> true
+| _ -> false
+
+let is_value = function
+| "false" | "nil" | "true" -> true
+| _ -> false
+
+let is_charop = function
+| "~" | "&" | "|" | "#" | ">" | "<" 
+| "+" | "-" | "*" | "/" | "^" | "%" -> true
+| _ -> false
+
+let is_lua_numeral (s : string) : bool =
+  let re_decimal_int = Str.regexp "^[0-9]+$" in
+  let re_decimal_float = Str.regexp "^\\([0-9]+\\.[0-9]*\\|[0-9]*\\.[0-9]+\\)\\([eE][-+]?[0-9]+\\)?$" in
+  let re_decimal_exp = Str.regexp "^[0-9]+[eE][-+]?[0-9]+$" in
+  let re_hex = Str.regexp "^0[xX][0-9a-fA-F]+$" in
+  let re_hex_float = Str.regexp "^0[xX][0-9a-fA-F]+\\.[0-9a-fA-F]*\\([pP][-+]?[0-9]+\\)?$\\|^0[xX][0-9a-fA-F]+[pP][-+]?[0-9]+$\\|^0[xX]\\.[0-9a-fA-F]+[pP][-+]?[0-9]+$" in
+  Str.string_match re_decimal_int s 0
+  || Str.string_match re_decimal_float s 0
+  || Str.string_match re_decimal_exp s 0
+  || Str.string_match re_hex s 0
+  || Str.string_match re_hex_float s 0
+
+let tokenise (str: string) = 
 
 
+  let rec coarse_split acc = function
+  | [] -> if acc <> "" then [Ident acc] else []
+  | c::tl when is_whitespace c ->  let w = Whitespace (String.make 1 c)  in
+      if acc <> "" then
+        let t = Ident acc in t::w::(coarse_split "" tl)
+      else w::(coarse_split "" tl)
+  | c::tl when is_symbol c ->  let s = Symbol (String.make 1 c)  in
+      if acc <> "" then
+        let t = Ident acc in t::s::(coarse_split "" tl)
+      else s::(coarse_split "" tl)
+  | c::tl -> let current = (acc ^ String.make 1 c) in coarse_split current tl
+
+
+in let rec refine  = function
+  | (Whitespace a)::(Whitespace b)::tl -> refine ((Whitespace (a^b))::tl)
+  | (Ident s)::tl when is_keyword s -> (Keyword s)::(refine tl)
+  | (Ident s)::tl when is_value s -> (Value s)::(refine tl)
+  | (Ident a)::tl when is_lua_numeral a -> (Number a)::(refine tl)
+  | (Ident a)::(Symbol ".")::(Ident b)::tl when is_lua_numeral (a^"."^b) -> (Number (a^"."^b))::(refine tl)
+  | (Ident a)::(Symbol ".")::(Ident b)::(Symbol "-")::(Ident c)::tl when is_lua_numeral (a^"."^b^"-"^c) -> (Number (a^"."^b^"-"^c))::(refine tl)
+  | (Ident a)::(Symbol ".")::(Ident b)::(Symbol "+")::(Ident c)::tl when is_lua_numeral (a^"."^b^"+"^c) -> (Number (a^"."^b^"+"^c))::(refine tl)
+  | (Ident a)::(Symbol "-")::(Ident b)::tl when is_lua_numeral (a^"-"^b) -> (Number (a^"-"^b))::(refine tl)
+  | (Ident a)::(Symbol "+")::(Ident b)::tl when is_lua_numeral (a^"+"^b) -> (Number (a^"+"^b))::(refine tl)
+  | (Symbol ".")::(Symbol ".")::(Symbol ".")::tl -> VarArg::(refine tl)
+  | (Symbol ".")::(Symbol ".")::tl -> (Operator "..")::(refine tl)
+  | (Symbol "<")::(Symbol "<")::tl -> (Operator "<<")::(refine tl)
+  | (Symbol "<")::(Symbol "=")::tl -> (Operator "<=")::(refine tl)
+  | (Symbol ">")::(Symbol ">")::tl -> (Operator ">>")::(refine tl)
+  | (Symbol ">")::(Symbol "=")::tl -> (Operator ">=")::(refine tl)
+  | (Symbol "/")::(Symbol "/")::tl -> (Operator "//")::(refine tl)
+  | (Symbol "=")::(Symbol "=")::tl -> (Operator "==")::(refine tl)
+  | (Symbol "~")::(Symbol "=")::tl -> (Operator "~=")::(refine tl)
+  | (Symbol s)::tl when is_charop s -> (Operator s)::(refine tl)
+  | (Ident "or")::tl -> (Operator "or")::(refine tl)
+  | (Ident "and")::tl -> (Operator "and")::(refine tl)
+  | (Ident "not")::tl -> (Operator "not")::(refine tl)
+  | (Symbol ":")::(Symbol ":")::tl -> LabelStart::(refine tl)
+  | hd::tl -> hd::(refine tl)
+  | [] -> []
+in str |> String.to_seq |> List.of_seq |> (coarse_split "") |> refine;;
 
 let parse _ = ([], None );;
 let unparse _ = "hello world !!!";;

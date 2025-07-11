@@ -102,5 +102,6 @@ and binop =
   | Or
 and unop = Neg | Not | Len | Bnot
 
+val tokenise : string -> token list
 val parse : string -> chunk
 val unparse : chunk -> string
