@@ -5,8 +5,8 @@ type literalstring = string
 type token =
     Whitespace of string
   | Comment of string
-  | StringStart
-  | StringEnd
+  | StringStart of string
+  | StringEnd of string
   | String of string
   | Escape of string
   | Keyword of string
