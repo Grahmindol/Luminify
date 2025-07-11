@@ -7,7 +7,7 @@ type literalstring = string;;
 type token = 
   | Whitespace of string (* Spaces, newlines, tabs, and carriage returns *)
   | Comment of string (* Either multi-line or single-line comments *)
-  | StringStart | StringEnd  (* starts and ends of a string. There will be no non-string tokens between these two. *)
+  | StringStart of string | StringEnd of string (* starts and ends of a string. There will be no non-string tokens between these two. *)
   | String of string (* Part of a string that isn't an escape *)
   | Escape of string (* A string escape, like \n, only found inside strings *)
   | Keyword of string (* Keywords. Like "while", "end", "do", etc *)
@@ -85,31 +85,39 @@ and binop = Add | Sub | Mul | Div | FloorDiv | Pow | Mod
           | And | Or
 and unop = Neg | Not | Len | Bnot;;
 
+let rec drop n l =
+  if n <= 0 then l
+  else match l with
+    | [] -> []
+    | _ :: tl -> drop (n - 1) tl
+
+    
 let is_whitespace = function
   | ' ' | '\n' | '\t' | '\r' -> true
   | _ -> false
 
 let is_symbol = function
+  | '"' | '\''
   | ',' | '{' | '}' | '[' | ']' | '(' | ')' | ';' | '.' | ':' | '='
   | '~' | '&' | '|' | '#' | '>' | '<' 
   | '+' | '-' | '*' | '/' | '^' | '%' -> true
   | _ -> false
 
 let is_keyword = function 
-| "break" | "do" | "else" | "elseif" | "end"
-| "for" | "function" | "goto" | "if" | "in"
-| "local" | "repeat" | "return"
-| "then" | "until" | "while" -> true
-| _ -> false
+  | "break" | "do" | "else" | "elseif" | "end"
+  | "for" | "function" | "goto" | "if" | "in"
+  | "local" | "repeat" | "return"
+  | "then" | "until" | "while" -> true
+  | _ -> false
 
 let is_value = function
-| "false" | "nil" | "true" -> true
-| _ -> false
+  | "false" | "nil" | "true" -> true
+  | _ -> false
 
 let is_charop = function
-| "~" | "&" | "|" | "#" | ">" | "<" 
-| "+" | "-" | "*" | "/" | "^" | "%" -> true
-| _ -> false
+  | "~" | "&" | "|" | "#" | ">" | "<" 
+  | "+" | "-" | "*" | "/" | "^" | "%" -> true
+  | _ -> false
 
 let is_lua_numeral (s : string) : bool =
   let re_decimal_int = Str.regexp "^[0-9]+$" in
@@ -123,8 +131,17 @@ let is_lua_numeral (s : string) : bool =
   || Str.string_match re_hex s 0
   || Str.string_match re_hex_float s 0
 
-let tokenise (str: string) = 
+let rec collect_string _start _end f acc = function
+  | (Symbol s)::t when s = (String.make 1 (_end.[0])) -> (StringStart _start)::(String acc)::(StringEnd _end)::(f (drop ((String.length _end)-2) t))
+  | (Ident s)::t | (Whitespace s)::t | (Symbol s)::t -> collect_string _start _end f (acc^s) t
+  | _ -> failwith "malformed string " 
+let rec count_equals count = function
+  | (Symbol "[")::t -> (count,t)
+  | (Symbol "=")::t -> count_equals (count + 1) t
+  | _ -> failwith "malformed string big begin" 
 
+let tokenise (str: string) = 
+  (* TODO : comment, string, label_end*)
 
   let rec coarse_split acc = function
   | [] -> if acc <> "" then [Ident acc] else []
@@ -141,15 +158,28 @@ let tokenise (str: string) =
 
 in let rec refine  = function
   | (Whitespace a)::(Whitespace b)::tl -> refine ((Whitespace (a^b))::tl)
+
   | (Ident s)::tl when is_keyword s -> (Keyword s)::(refine tl)
+
   | (Ident s)::tl when is_value s -> (Value s)::(refine tl)
-  | (Ident a)::tl when is_lua_numeral a -> (Number a)::(refine tl)
-  | (Ident a)::(Symbol ".")::(Ident b)::tl when is_lua_numeral (a^"."^b) -> (Number (a^"."^b))::(refine tl)
+
+  |(Symbol "'")::tl -> collect_string "'" "'" refine "" tl
+  |(Symbol "\"")::tl -> collect_string "\"" "\"" refine "" tl
+  |(Symbol "[")::tl -> let (c,t) = count_equals 0 tl in 
+      let _start = "["^(String.make c '=')^"[" in 
+      let _end = "]"^(String.make c '=')^"]" in 
+      collect_string _start _end refine "" t
+
+    
   | (Ident a)::(Symbol ".")::(Ident b)::(Symbol "-")::(Ident c)::tl when is_lua_numeral (a^"."^b^"-"^c) -> (Number (a^"."^b^"-"^c))::(refine tl)
   | (Ident a)::(Symbol ".")::(Ident b)::(Symbol "+")::(Ident c)::tl when is_lua_numeral (a^"."^b^"+"^c) -> (Number (a^"."^b^"+"^c))::(refine tl)
+  | (Ident a)::(Symbol ".")::(Ident b)::tl when is_lua_numeral (a^"."^b) -> (Number (a^"."^b))::(refine tl)
   | (Ident a)::(Symbol "-")::(Ident b)::tl when is_lua_numeral (a^"-"^b) -> (Number (a^"-"^b))::(refine tl)
   | (Ident a)::(Symbol "+")::(Ident b)::tl when is_lua_numeral (a^"+"^b) -> (Number (a^"+"^b))::(refine tl)
+  | (Ident a)::tl when is_lua_numeral a -> (Number a)::(refine tl)
+
   | (Symbol ".")::(Symbol ".")::(Symbol ".")::tl -> VarArg::(refine tl)
+
   | (Symbol ".")::(Symbol ".")::tl -> (Operator "..")::(refine tl)
   | (Symbol "<")::(Symbol "<")::tl -> (Operator "<<")::(refine tl)
   | (Symbol "<")::(Symbol "=")::tl -> (Operator "<=")::(refine tl)
@@ -162,6 +192,7 @@ in let rec refine  = function
   | (Ident "or")::tl -> (Operator "or")::(refine tl)
   | (Ident "and")::tl -> (Operator "and")::(refine tl)
   | (Ident "not")::tl -> (Operator "not")::(refine tl)
+
   | (Symbol ":")::(Symbol ":")::tl -> LabelStart::(refine tl)
   | hd::tl -> hd::(refine tl)
   | [] -> []
