@@ -85,13 +85,6 @@ and binop = Add | Sub | Mul | Div | FloorDiv | Pow | Mod
           | And | Or
 and unop = Neg | Not | Len | Bnot;;
 
-let rec drop n l =
-  if n <= 0 then l
-  else match l with
-    | [] -> []
-    | _ :: tl -> drop (n - 1) tl
-
-    
 let is_whitespace = function
   | ' ' | '\n' | '\t' | '\r' -> true
   | _ -> false
@@ -131,17 +124,31 @@ let is_lua_numeral (s : string) : bool =
   || Str.string_match re_hex s 0
   || Str.string_match re_hex_float s 0
 
-let rec collect_string _start _end f acc = function
-  | (Symbol s)::t when s = (String.make 1 (_end.[0])) -> (StringStart _start)::(String acc)::(StringEnd _end)::(f (drop ((String.length _end)-2) t))
-  | (Ident s)::t | (Whitespace s)::t | (Symbol s)::t -> collect_string _start _end f (acc^s) t
-  | _ -> failwith "malformed string " 
+
 let rec count_equals count = function
-  | (Symbol "[")::t -> (count,t)
   | (Symbol "=")::t -> count_equals (count + 1) t
-  | _ -> failwith "malformed string big begin" 
+  | _ as t -> (count,t)
+
+let rec collect_string _start _end f acc tokens =
+  match tokens with
+  | (Symbol s)::t when s = String.make 1 _end.[0] ->
+      if String.length _end < 2 then
+        (* Simple string end *)
+        StringStart _start :: String acc :: StringEnd _end :: f t
+      else
+        let (c, rest) = count_equals 0 t in
+        if c = (String.length _end - 2) then
+          match rest with
+          | (Symbol "]")::tl -> StringStart _start :: String acc :: StringEnd _end :: f tl
+          | _ -> collect_string _start _end f (acc ^ s ^ String.make c '=') rest
+        else collect_string _start _end f (acc ^ s ^ String.make c '=') rest
+  | (Ident s)::t | (Whitespace s)::t| (Symbol s)::t ->
+      collect_string _start _end f (acc ^ s) t
+  | _ as t ->
+      UnIdentified acc :: f t
 
 let tokenise (str: string) = 
-  (* TODO : comment, string, label_end*)
+  (* TODO : comment, label_end*)
 
   let rec coarse_split acc = function
   | [] -> if acc <> "" then [Ident acc] else []
@@ -165,10 +172,12 @@ in let rec refine  = function
 
   |(Symbol "'")::tl -> collect_string "'" "'" refine "" tl
   |(Symbol "\"")::tl -> collect_string "\"" "\"" refine "" tl
-  |(Symbol "[")::tl -> let (c,t) = count_equals 0 tl in 
+  |(Symbol "[")::tl -> begin match count_equals 0 tl with 
+    | (c,(Symbol "[")::t) -> 
       let _start = "["^(String.make c '=')^"[" in 
       let _end = "]"^(String.make c '=')^"]" in 
       collect_string _start _end refine "" t
+    | (c, t) -> (UnIdentified ("["^(String.make c '='))) :: refine t end
 
     
   | (Ident a)::(Symbol ".")::(Ident b)::(Symbol "-")::(Ident c)::tl when is_lua_numeral (a^"."^b^"-"^c) -> (Number (a^"."^b^"-"^c))::(refine tl)
