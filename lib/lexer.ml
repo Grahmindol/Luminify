@@ -9,7 +9,6 @@ type token =
   | Comment of string (* Either multi-line or single-line comments *)
   | StringStart of string | StringEnd of string (* starts and ends of a string. There will be no non-string tokens between these two. *)
   | String of string (* Part of a string that isn't an escape *)
-  | Escape of string (* A string escape, like \n, only found inside strings *)
   | Keyword of string (* Keywords. Like "while", "end", "do", etc *)
   | Value of string (* Special values. Only true, false, and nil *) 
   | Ident of string (* Identifier. Variables, function names, etc *)
@@ -84,6 +83,23 @@ and binop = Add | Sub | Mul | Div | FloorDiv | Pow | Mod
           | Lt | Le | Gt | Ge | Eq | Ne
           | And | Or
 and unop = Neg | Not | Len | Bnot;;
+let token_to_string = function
+  | Whitespace s
+  | Comment s
+  | StringStart s
+  | StringEnd s
+  | String s
+  | Keyword s
+  | Value s
+  | Ident s
+  | Number s
+  | Symbol s
+  | Operator s
+  | UnIdentified s -> s
+  | VarArg -> "..."
+  | LabelStart
+  | LabelEnd -> "::"
+
 
 let is_whitespace = function
   | ' ' | '\n' | '\t' | '\r' -> true
@@ -147,9 +163,16 @@ let rec collect_string _start _end f acc tokens =
   | _ as t ->
       UnIdentified acc :: f t
 
-let tokenise (str: string) = 
-  (* TODO : comment, label_end*)
+let rec collect_comment acc f = function 
+  | (Whitespace s)::tl when String.contains s '\n' -> 
+    let i = String.index s '\n' in
+    let first = String.sub s 0 (i + 1) in 
+    let rest = String.sub s (i + 1) (String.length s - i - 1) in 
+    (Comment (acc^first))::(Whitespace rest) :: (f tl)
+  | t::tl -> collect_comment (acc^(token_to_string t)) f tl
+  | [] -> Comment acc :: []
 
+let tokenise (str: string) = 
   let rec coarse_split acc = function
   | [] -> if acc <> "" then [Ident acc] else []
   | c::tl when is_whitespace c ->  let w = Whitespace (String.make 1 c)  in
@@ -189,6 +212,9 @@ in let rec refine  = function
 
   | (Symbol ".")::(Symbol ".")::(Symbol ".")::tl -> VarArg::(refine tl)
 
+  | (Symbol ":")::(Symbol ":")::tl -> LabelStart::(refine tl)
+  | (Symbol "-")::(Symbol "-")::tl -> (Comment "--")::(refine tl)
+
   | (Symbol ".")::(Symbol ".")::tl -> (Operator "..")::(refine tl)
   | (Symbol "<")::(Symbol "<")::tl -> (Operator "<<")::(refine tl)
   | (Symbol "<")::(Symbol "=")::tl -> (Operator "<=")::(refine tl)
@@ -202,10 +228,21 @@ in let rec refine  = function
   | (Ident "and")::tl -> (Operator "and")::(refine tl)
   | (Ident "not")::tl -> (Operator "not")::(refine tl)
 
-  | (Symbol ":")::(Symbol ":")::tl -> LabelStart::(refine tl)
   | hd::tl -> hd::(refine tl)
   | [] -> []
-in str |> String.to_seq |> List.of_seq |> (coarse_split "") |> refine;;
+in let rec finish  = function
+  | (Comment "--")::(StringStart "[[")::(String c)::(StringEnd "]]")::tl -> Comment ("--[["^c^"]]")::(finish tl)
+  | (Comment "--")::tl -> collect_comment "--" finish tl
+
+  | LabelStart::(Whitespace a)::(Ident n)::(Whitespace c)::LabelStart::tl -> LabelStart::(Whitespace a)::(Ident n)::(Whitespace c)::LabelEnd::(finish tl)
+  | LabelStart::(Whitespace a)::(Ident n)::LabelStart::tl -> LabelStart::(Whitespace a)::(Ident n)::LabelEnd::(finish tl)
+  | LabelStart::(Ident n)::(Whitespace c)::LabelStart::tl -> LabelStart::(Ident n)::(Whitespace c)::LabelEnd::(finish tl)
+  | LabelStart::(Ident n)::LabelStart::tl -> LabelStart::(Ident n)::LabelEnd::(finish tl)
+  | LabelStart::tl -> (UnIdentified "::")::(finish tl)
+  
+  | hd::tl -> hd::(finish tl)
+  | [] -> []
+in str |> String.to_seq |> List.of_seq |> (coarse_split "") |> refine |> finish;;
 
 let parse _ = ([], None );;
 let unparse _ = "hello world !!!";;

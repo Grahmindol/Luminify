@@ -8,7 +8,6 @@ type token =
   | StringStart of string
   | StringEnd of string
   | String of string
-  | Escape of string
   | Keyword of string
   | Value of string
   | Ident of string
