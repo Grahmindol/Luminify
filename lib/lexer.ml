@@ -83,6 +83,7 @@ and binop = Add | Sub | Mul | Div | FloorDiv | Pow | Mod
           | Lt | Le | Gt | Ge | Eq | Ne
           | And | Or
 and unop = Neg | Not | Len | Bnot;;
+
 let token_to_string = function
   | Whitespace s
   | Comment s
@@ -164,11 +165,7 @@ let rec collect_string _start _end f acc tokens =
       UnIdentified acc :: f t
 
 let rec collect_comment acc f = function 
-  | (Whitespace s)::tl when String.contains s '\n' -> 
-    let i = String.index s '\n' in
-    let first = String.sub s 0 (i + 1) in 
-    let rest = String.sub s (i + 1) (String.length s - i - 1) in 
-    (Comment (acc^first))::(Whitespace rest) :: (f tl)
+  | (Whitespace "\n")::tl -> (Comment (acc^"\n")):: (f tl)
   | t::tl -> collect_comment (acc^(token_to_string t)) f tl
   | [] -> Comment acc :: []
 
@@ -193,6 +190,9 @@ in let rec refine  = function
 
   | (Ident s)::tl when is_value s -> (Value s)::(refine tl)
 
+  | (Symbol "-")::(Symbol "-")::(Symbol "[")::(Symbol "[")::tl -> Comment ("--")::(collect_string "[[" "]]" refine "" tl)
+  | (Symbol "-")::(Symbol "-")::tl -> collect_comment "--" refine tl
+
   |(Symbol "'")::tl -> collect_string "'" "'" refine "" tl
   |(Symbol "\"")::tl -> collect_string "\"" "\"" refine "" tl
   |(Symbol "[")::tl -> begin match count_equals 0 tl with 
@@ -213,7 +213,6 @@ in let rec refine  = function
   | (Symbol ".")::(Symbol ".")::(Symbol ".")::tl -> VarArg::(refine tl)
 
   | (Symbol ":")::(Symbol ":")::tl -> LabelStart::(refine tl)
-  | (Symbol "-")::(Symbol "-")::tl -> (Comment "--")::(refine tl)
 
   | (Symbol ".")::(Symbol ".")::tl -> (Operator "..")::(refine tl)
   | (Symbol "<")::(Symbol "<")::tl -> (Operator "<<")::(refine tl)
@@ -232,7 +231,6 @@ in let rec refine  = function
   | [] -> []
 in let rec finish  = function
   | (Comment "--")::(StringStart "[[")::(String c)::(StringEnd "]]")::tl -> Comment ("--[["^c^"]]")::(finish tl)
-  | (Comment "--")::tl -> collect_comment "--" finish tl
 
   | LabelStart::(Whitespace a)::(Ident n)::(Whitespace c)::LabelStart::tl -> LabelStart::(Whitespace a)::(Ident n)::(Whitespace c)::LabelEnd::(finish tl)
   | LabelStart::(Whitespace a)::(Ident n)::LabelStart::tl -> LabelStart::(Whitespace a)::(Ident n)::LabelEnd::(finish tl)
@@ -244,5 +242,33 @@ in let rec finish  = function
   | [] -> []
 in str |> String.to_seq |> List.of_seq |> (coarse_split "") |> refine |> finish;;
 
-let parse _ = ([], None );;
+let rec untokenise = function
+| hd::tl -> token_to_string hd ^ (untokenise tl)
+| [] -> "";;
+
+let is_latin_or_underscore c =
+  (c >= 'a' && c <= 'z')
+  || (c >= 'A' && c <= 'Z')
+  || (c = '_')
+  || (c >= '0' && c <= '9');;
+
+
+let rec filter_useless_tokens = function
+  | a::(Comment _)::(Comment _)::tl
+  | a::(Comment _)::(Whitespace _)::tl
+  | a::(Whitespace _)::(Whitespace _)::tl
+  | a::(Whitespace _)::(Comment _)::tl ->  filter_useless_tokens (a::(Whitespace " " )::tl)
+  | a::(Comment _)::b::tl | a::(Whitespace _)::b::tl when 
+      (let s = token_to_string a in is_latin_or_underscore (s.[String.length s - 1]))
+    &&(let s = token_to_string b in is_latin_or_underscore (s.[0]))
+  -> a::(Whitespace " ")::(filter_useless_tokens (b::tl))
+  | (Comment _)::tl | (Whitespace _)::tl -> filter_useless_tokens tl
+  | hd::tl -> hd::(filter_useless_tokens tl)
+  | [] -> []
+
+let parse intput = 
+  let tokens = filter_useless_tokens (tokenise intput) in
+  ignore tokens;
+  print_endline (untokenise tokens);
+  ([], None );;
 let unparse _ = "hello world !!!";;
