@@ -1,23 +1,7 @@
+open Tokeniser
 type name = string
 type numeral = float
 type literalstring = string
-
-type token =
-    Whitespace of string
-  | Comment of string
-  | StringStart of string
-  | StringEnd of string
-  | String of string
-  | Keyword of string
-  | Value of string
-  | Ident of string
-  | Number of string
-  | Symbol of string
-  | VarArg
-  | Operator of string
-  | LabelStart
-  | LabelEnd
-  | UnIdentified of string
 
 type chunk = block
 and block = stat list * retstat option
@@ -101,10 +85,29 @@ and binop =
   | Or
 and unop = Neg | Not | Len | Bnot
 
-val token_to_string : token -> string
-
-val tokenise : string -> token list
-val untokenise :  token list -> string
+val parse_unop : token list -> (unop * token list) option
+val parse_binop : token list -> (binop * token list) option 
+val parse_fieldsep : token list -> (fieldsep * token list) option 
+val parse_field : token list -> (field * token list) option 
+val parse_fieldlist : token list -> (fieldlist * token list) option
+val parse_tableconstructor : token list -> (tableconstructor * token list) option
+val parse_parlist : token list -> (parlist * token list) option 
+val parse_funcbody : token list -> (funcbody * token list) option 
+val parse_functiondef : token list -> (functiondef * token list) option 
+val parse_args : token list -> (args * token list) option 
+val parse_functioncall : token list -> (functioncall * token list) option 
+val parse_prefixexp : token list -> (prefixexp * token list) option 
+val parse_exp : token list -> (exp * token list) option 
+val parse_explist : token list -> (explist * token list) option 
+val parse_namelist : token list -> (namelist * token list) option 
+val parse_var : token list -> (var * token list) option 
+val parse_varlist : token list -> (varlist * token list) option 
+val parse_funcname : token list -> (funcname * token list) option 
+val parse_label : token list -> (label * token list) option 
+val parse_retstat : token list -> (retstat * token list) option 
+val parse_stat : token list -> (stat * token list) option 
+val parse_block : token list -> block * token list
+val parse_chunk : token list -> chunk * token list 
 
 val parse : string -> chunk
 val unparse : chunk -> string
