@@ -309,18 +309,140 @@ and parse_retstat = function
 
 
 and parse_stat = function
-| (Symbol ";")::tl -> Some (Empty,tl)
-| (Keyword "break")::tl -> Some (Break,tl)
-| (Keyword "goto")::(Ident name)::tl -> Some (Goto name,tl)
-| (Keyword "do")::_ ->  None;
-| (Keyword "while")::_ -> None;
-| (Keyword "repeat")::_ -> None;
-| (Keyword "if")::_ -> None;
-| (Keyword "for")::_ -> None;
-| (Keyword "function")::_ -> None;
-| (Keyword "local")::(Keyword "function")::_ -> None;
-| (Keyword "local")::_ -> None;
-| _ -> None
+  | (Symbol ";") :: tl -> Some (Empty, tl)
+  | (Keyword "break") :: tl -> Some (Break, tl)
+  | (Keyword "goto") :: (Ident name) :: tl -> Some (Goto name, tl)
+
+  | (Keyword "do") :: tl ->
+    begin match parse_block tl with
+      | bl, (Keyword "end") :: rest_out -> Some (Do bl, rest_out)
+      | _ -> failwith "expected 'end' after 'do'"
+    end
+
+  | (Keyword "while") :: tl ->
+    begin match parse_exp tl with
+      | Some (exp, (Keyword "do") :: rest) ->
+        begin match parse_block rest with
+          | bl, (Keyword "end") :: rest_out -> Some (While (exp, bl), rest_out)
+          | _ -> failwith "expected 'end' after 'while ... do'"
+        end
+      | _ -> failwith "expected 'do' after 'while' expression"
+    end
+
+  | (Keyword "repeat") :: tl ->
+    begin match parse_block tl with
+      | bl, (Keyword "until") :: rest ->
+        begin match parse_exp rest with
+          | Some (exp, rest_out) -> Some (Repeat (bl, exp), rest_out)
+          | _ -> failwith "expected expression after 'until'"
+        end
+      | _ -> failwith "expected 'until' after 'repeat' block"
+    end
+
+  | (Keyword "if") :: tl ->
+    begin match parse_exp tl with
+      | Some (exp, (Keyword "then") :: rest) ->
+        begin match parse_block rest with
+          | bl, rest_block ->
+            let rec aux = function
+              | (Keyword "elseif") :: inner ->
+                begin match parse_exp inner with
+                  | Some (exp_elif, (Keyword "then") :: block_tl) ->
+                    let bl_elif, after = parse_block block_tl in
+                    let elifs, else_block, rest_out = aux after in
+                    ((exp_elif, bl_elif) :: elifs, else_block, rest_out)
+                  | _ -> failwith "expected expression after 'elseif'"
+                end
+              | (Keyword "else") :: inner ->
+                let bl_else, after = parse_block inner in
+                begin match after with
+                  | (Keyword "end") :: rest_out -> ([], Some bl_else, rest_out)
+                  | _ -> failwith "expected 'end' after 'else'"
+                end
+              | (Keyword "end") :: rest_out -> ([], None, rest_out)
+              | _ -> failwith "expected 'end' after 'if' block"
+            in
+            let elifs, else_block, rest_out = aux rest_block in
+            Some (If (exp, bl, elifs, else_block), rest_out)
+        end
+      | _ -> failwith "expected 'then' after 'if' expression"
+    end
+
+  | (Keyword "for") :: (Ident s) :: (Symbol "=") :: tl -> 
+    begin match parse_exp tl with
+    | Some (a, (Symbol ",")::tl_sec) -> 
+      begin match parse_exp tl_sec with 
+      | Some (b, (Symbol ",")::tl_thi) ->
+        begin match parse_exp tl_thi with
+        | Some (c, (Keyword "do")::block_tl) -> 
+          begin match parse_block block_tl with
+          | bl, (Keyword "end") :: rest_out -> Some (ForNum (s,a,b,Some c,bl), rest_out)
+          | _ -> failwith "expected 'end' after 'do'"
+          end
+        | _ -> failwith "expected a last expression after ',' symbol"
+        end
+      | Some (b, (Keyword "do")::block_tl) -> 
+        begin match parse_block block_tl with
+        | bl, (Keyword "end") :: rest_out -> Some (ForNum (s,a,b,None,bl), rest_out)
+        | _ -> failwith "expected 'end' after 'do'"
+        end
+      | _ -> failwith "expected an expression after ',' symbol"
+      end
+    | _ -> failwith "expected two expression after '=' symbol"
+    end
+
+  | (Keyword "for") :: tl -> 
+    begin match parse_namelist tl with 
+    | Some (nl, (Keyword "in"):: tl_sec) -> 
+      begin match parse_explist tl_sec with 
+      | Some (el, (Keyword "do"):: block_tl) ->
+        begin match parse_block block_tl with
+        | bl, (Keyword "end") :: rest_out -> Some (ForIn (nl,el,bl), rest_out)
+        | _ -> failwith "expected 'end' after 'do'"
+        end
+      | _ -> failwith "expected expression list followed by 'do' symbol aftel 'in'"
+      end
+    | _ -> failwith "expected Name list followed by 'in' symbol aftel 'for'"
+    end
+
+  | (Keyword "function") :: tl -> 
+    begin match parse_funcname tl with 
+    | Some (fn, tl_sec) ->
+      begin match parse_funcbody tl_sec with
+      | Some (fb , rest_out) -> Some (Function (fn,fb), rest_out)
+      | _ -> failwith "expected function body after 'function ...' expression"
+      end
+    | _ -> failwith "expected a name after 'function' expression"
+    end
+
+  | (Keyword "local") :: (Keyword "function") :: (Ident fn) :: tl ->
+    begin match parse_funcbody tl with
+    | Some (fb , rest_out) -> Some (LocalFunction (fn,fb), rest_out)
+    | _ -> failwith "expected function body after 'local function ...' expression"
+    end
+
+  | (Keyword "local") :: tl -> 
+    begin match parse_namelist tl with
+    | Some (nl,  (Symbol "=")::rest) -> 
+      begin match parse_explist rest with 
+      | Some (el, rest_out) -> Some (LocalAssign (nl, Some el), rest_out)
+      | _ -> failwith "expected expression list after 'local ... =' expression"
+      end
+    | Some (nl, rest_out) -> Some (LocalAssign (nl, None), rest_out)
+    | _ -> failwith "expected name list after 'local' expression"
+    end 
+
+  | l -> match parse_label l with
+    | Some (lab, rest_out) -> Some (LabelStat lab, rest_out)
+  | _ -> match parse_functioncall l with
+    | Some (fc, rest_out) -> Some (FunctionCallStat fc, rest_out)
+  | _ -> match parse_varlist l with
+    | Some (vl, (Symbol "=")::rest) -> 
+      begin match parse_explist rest with 
+      | Some (el, rest_out) -> Some (Assignment (vl,el), rest_out) 
+      | _ -> failwith "expected expression list after '... =' expression"
+      end
+  | _ -> None 
 
 and parse_block l = match parse_retstat l with
 | None -> begin 
