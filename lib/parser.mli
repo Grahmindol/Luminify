@@ -48,13 +48,13 @@ and functioncall =
     Call of prefixexp * args
   | MethodCall of prefixexp * string * args
 and args =
-    ArgsExpList of explist
+    ArgsExpList of explist option
   | ArgsTable of tableconstructor
   | ArgsString of string
 and functiondef = FunctionDef of funcbody
-and funcbody = FuncBody of parlist * block
-and parlist = Parlist of namelist * parlist option | ParEllipsis
-and tableconstructor = TableConstructor of fieldlist
+and funcbody = FuncBody of parlist option * block
+and parlist = Parlist of namelist * bool | ParEllipsis
+and tableconstructor = TableConstructor of fieldlist option
 and fieldlist = field * (fieldsep * field) list * fieldsep option
 and field =
     FieldExp of exp * exp
