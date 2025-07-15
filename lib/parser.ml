@@ -234,44 +234,62 @@ and parse_prefixexp = function
 | _ -> None
 
 and parse_exp l =
-  match (
-    match l with
-    | (Value "nil") :: tl -> Some (Nil, tl)
-    | (Value "false") :: tl -> Some (False, tl)
-    | (Value "true") :: tl -> Some (True, tl)
-    | (Number n) :: tl -> Some (Numeral n, tl)
-    | (StringStart _) :: (String s) :: (StringEnd _) :: tl -> Some (LiteralString s, tl)
-    | VarArg :: tl -> Some (ExpEllipsis, tl)
-    | l -> 
-      (* functiondef *)
-      (match parse_functiondef l with
-      | Some (fd, rest) -> Some (ExpFunctionDef fd, rest)
-      | None ->
-        (* prefixexp *)
-        match parse_prefixexp l with
-        | Some (pe, rest) -> Some (PrefixExp pe, rest)
-        | None ->
-          (* tableconstructor *)
-          match parse_tableconstructor l with
-          | Some (tc, rest) -> Some (ExpTableConstructor tc, rest)
-          | None ->
-            (* unop exp *)
-            match parse_unop l with
-            | Some (un, rest) -> 
-              (match parse_exp rest with
-              | Some (e, rest_out) -> Some (UnOp (un, e), rest_out)
-              | None -> None)
-            | None -> None))
-  with
+  let rec insert_binop left_tree op right_tree =
+    let precedence_of_binop = function
+      | Or        -> 1
+      | And       -> 2
+      | Lt | Gt | Le | Ge | Ne | Eq -> 3
+      | Bor       -> 4
+      | Bxor      -> 5
+      | Band      -> 6
+      | Shl | Shr -> 7
+      | Concat    -> 8
+      | Add | Sub -> 9
+      | Mul | Div | FloorDiv | Mod -> 10
+      | Pow       -> 12
+  in match left_tree with
+      | BinOp (l1, op1, r1) ->
+        let prec1 = precedence_of_binop op1 in
+        let prec2 = precedence_of_binop op in
+        let assoc2 = match op with 
+          | Concat | Pow -> true 
+          | _ -> false in
+
+        if prec1 < prec2 || (prec1 = prec2 && assoc2) then
+          (* le nouveau op a plus de priorité, on descend à droite *)
+          BinOp (l1, op1, insert_binop r1 op right_tree)
+        else
+      (* le nouveau op prend le dessus *)
+          BinOp (left_tree, op, right_tree)
+      | _ -> BinOp (left_tree, op, right_tree)
+  in let rec aux left_exp left_rest =
+    match parse_binop left_rest with
+    | Some (bi, rest_after_op) ->
+      begin match parse_exp rest_after_op with
+      | Some (right_exp, rest_out) ->
+        aux (insert_binop left_exp bi right_exp) rest_out
+      | None -> failwith "expression expected after binary operator"
+      end
+    | None -> Some (left_exp, left_rest)
+  in match l with
+  | (Value "nil") :: tl -> aux Nil tl
+  | (Value "false") :: tl -> aux False tl
+  | (Value "true") :: tl -> aux True tl
+  | (Number n) :: tl -> aux (Numeral n) tl
+  | (StringStart _) :: (String s) :: (StringEnd _) :: tl -> aux (LiteralString s) tl
+  | VarArg :: tl -> aux ExpEllipsis tl
+  | _ -> match parse_functiondef l with
+    | Some (fd, rest) -> aux (ExpFunctionDef fd) rest
+  | None -> match parse_prefixexp l with
+    | Some (pe, rest) -> aux (PrefixExp pe) rest
+  | None -> match parse_tableconstructor l with
+    | Some (tc, rest) -> aux (ExpTableConstructor tc) rest
+  | None ->  match parse_unop l with
+    | Some (un, rest_after_unop) ->(match parse_exp rest_after_unop with
+      | Some (BinOp (a, Pow, b), rest_out) -> aux (BinOp (UnOp (un, a), Pow, b)) rest_out
+      | Some (e, rest_out) -> aux (UnOp (un, e)) rest_out
+      | None -> failwith "expression expected after unary operator")
   | None -> None
-  | Some (exp, rest) ->
-    (* binop exp *)
-    match parse_binop rest with
-    | None -> Some (exp, rest)
-    | Some (bi, r) ->
-      (match parse_exp r with
-      | None -> None
-      | Some (sec, rest_out) -> Some (BinOp (exp, bi, sec), rest_out))
 
 and parse_explist l = match parse_exp l with
 | None -> None
