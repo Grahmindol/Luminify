@@ -35,8 +35,8 @@ and exp =
     Nil
   | False
   | True
-  | Numeral of numeral
-  | LiteralString of literalstring
+  | Numeral of string
+  | LiteralString of string
   | ExpEllipsis
   | ExpFunctionDef of functiondef
   | PrefixExp of prefixexp

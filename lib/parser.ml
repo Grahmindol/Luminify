@@ -34,7 +34,7 @@ and var =
 and namelist = NameList of name * name list
 and explist =  ExpList of exp * exp list
 and exp =
-  | Nil | False | True | Numeral of numeral | LiteralString of literalstring
+  | Nil | False | True | Numeral of string | LiteralString of string
   | ExpEllipsis | ExpFunctionDef of functiondef
   | PrefixExp of prefixexp
   | ExpTableConstructor of tableconstructor
@@ -69,12 +69,6 @@ and binop = Add | Sub | Mul | Div | FloorDiv | Pow | Mod
           | Lt | Le | Gt | Ge | Eq | Ne
           | And | Or
 and unop = Neg | Not | Len | Bnot
-
-let rec split_at_first t = function
-| [] -> ([],[])
-| hd::tl when hd = t -> ([],tl)
-| hd::tl -> let f,s = split_at_first t tl
-in (hd::f,s);;
 
 let parse_unop = function
 | (Operator "-")::tl -> Some (Neg,tl)
@@ -113,12 +107,15 @@ let parse_fieldsep = function
 | _ -> None;;
 
 let rec parse_field = function
-| (Symbol "[")::tl -> begin
-  match split_at_first (Symbol "]") tl with
-  | key_tl, _::val_tl -> begin match (parse_exp key_tl, parse_exp val_tl) with
-  | Some (key,[]), Some (value, rest) -> Some (FieldExp (key,value), rest)
-  | _ -> None end
-  | _ -> None end
+| (Symbol "[")::tl -> 
+  begin match parse_exp tl with
+  | Some (key,(Symbol "]")::(Symbol "=")::tl_sec) -> 
+    begin match parse_exp tl_sec with
+    | Some (value,rest) -> Some (FieldExp (key,value), rest)
+    | _ -> failwith "value exepted after '='" 
+    end
+  | _ -> failwith "key exepted after '['"  
+  end
 | (Ident s)::(Symbol "=")::tl -> 
   begin match parse_exp tl with
   | Some (value, rest) -> Some (FieldName (s,value),rest)
@@ -144,10 +141,11 @@ and parse_fieldlist l =
 
 and parse_tableconstructor = function
 | (Symbol "{")::(Symbol "}")::rest -> Some (TableConstructor None, rest)
-| (Symbol "{")::tl -> let field_list_tl, rest = split_at_first (Symbol "}") tl
-  in begin match parse_fieldlist  field_list_tl with 
-  | Some (fl,[]) -> Some (TableConstructor (Some fl), rest)
-  | _ -> None end
+| (Symbol "{")::tl -> 
+  begin match parse_fieldlist tl with
+  | Some (fl, (Symbol "}")::rest) -> Some (TableConstructor (Some fl), rest)
+  | _ -> failwith "only field exepted between '{' and '}'"
+  end 
 | _ -> None
 
 and parse_parlist = function
@@ -158,13 +156,20 @@ and parse_parlist = function
 | None -> None
 
 and parse_funcbody = function
-| (Symbol "(")::tl -> let parlist_tl, rest = split_at_first (Symbol ")") tl
-in let block_tl, rest_out = split_at_first (Keyword "end") rest
-in let par = match parse_parlist parlist_tl with
-  | Some (p,[]) -> Some p
-  | _ -> None
-in let bl,_ = parse_block block_tl
-in Some (FuncBody (par, bl), rest_out)
+| (Symbol "(")::(Symbol ")")::block_tl -> 
+  begin match parse_block block_tl with 
+  | bl , (Keyword "end")::rest_out ->  Some (FuncBody (None, bl), rest_out)
+  | _ -> failwith "'end' exepted after block"
+  end
+| (Symbol "(")::tl -> 
+  begin match parse_parlist tl with
+  | Some (p, (Symbol ")")::block_tl) ->
+    begin match parse_block block_tl with 
+    | bl , (Keyword "end")::rest_out ->  Some (FuncBody (Some p, bl), rest_out)
+    | _ -> failwith "'end' exepted after block"
+    end
+  | _ -> failwith "')' exepted after parameter list"
+  end
 | _ -> None
 
 and parse_functiondef = function
@@ -176,11 +181,12 @@ and parse_functiondef = function
 | _ -> None
 
 and parse_args =  function
-| (Symbol "(")::tl -> let explist_tl, rest = split_at_first (Symbol ")") tl
-in let exp = match parse_explist explist_tl with 
-  | Some (exp,[]) -> Some exp
-  | _ -> None
-in Some (ArgsExpList exp, rest)
+| (Symbol "(")::(Symbol ")")::rest -> Some (ArgsExpList None, rest)
+| (Symbol "(")::tl -> 
+  begin match parse_explist tl with
+  | Some (el, (Symbol ")")::rest) -> Some (ArgsExpList (Some el), rest)
+  | _ -> failwith "')' exepted after explist "
+  end
 | (StringStart _)::(String s)::(StringEnd _)::tl -> Some (ArgsString s,tl)
 | l -> match parse_tableconstructor l with 
 | Some (tc, rest) -> Some (ArgsTable tc, rest)
@@ -196,11 +202,11 @@ and parse_functioncall l = match parse_prefixexp l with
   | Some (ar,rest_out) -> Some (Call (pe,ar), rest_out) end
 
 and parse_prefixexp = function
-| (Symbol "(")::tl -> let exp_tl, rest = split_at_first (Symbol ")") tl
-in begin match parse_exp exp_tl with
-  | Some (exp,[]) -> Some (Parens exp,rest)
-  | _ -> None
-end
+| (Symbol "(")::tl -> 
+  begin match parse_exp tl with
+  | Some (exp, (Symbol ")")::rest) -> Some (Parens exp,rest)
+  | _ -> failwith "')' exepted after a '( ...' "
+  end
 | l -> match parse_var l with
 | Some (var, rest) -> Some (Var var,rest) 
 | None -> match parse_functioncall l with
@@ -213,7 +219,7 @@ and parse_exp l =
     | (Value "nil") :: tl -> Some (Nil, tl)
     | (Value "false") :: tl -> Some (False, tl)
     | (Value "true") :: tl -> Some (True, tl)
-    | (Number _) :: tl -> Some (Numeral 0.0 (* TODO: parse number *), tl)
+    | (Number n) :: tl -> Some (Numeral n, tl)
     | (StringStart _) :: (String s) :: (StringEnd _) :: tl -> Some (LiteralString s, tl)
     | VarArg :: tl -> Some (ExpEllipsis, tl)
     | l -> 
@@ -269,10 +275,10 @@ and parse_var = function
 | (Ident s)::tl -> Some (Name s,tl)
 | l -> match parse_prefixexp l with
 | Some (pe,(Symbol ".")::(Ident name)::rest) -> Some (Field (pe,name), rest)
-| Some (pe,(Symbol "[")::rest) -> let exp_tl, rest_out = split_at_first (Symbol "]") rest
-  in begin match parse_exp exp_tl with 
-  | Some (exp, []) -> Some (Indexed (pe,exp), rest_out)
-  | _ -> None 
+| Some (pe,(Symbol "[")::exp_tl) -> 
+  begin match parse_exp exp_tl with 
+  | Some (exp, (Symbol "]")::rest_out) -> Some (Indexed (pe,exp), rest_out)
+  | _ -> failwith "']' exepted after '['" 
   end
 | _ -> None
 
@@ -306,7 +312,6 @@ and parse_retstat = function
   | None, (Symbol ";")::rest -> Some (RetStat (None,true), rest)
   | None, rest -> Some (RetStat (None,false), rest) end
 | _ -> None
-
 
 and parse_stat = function
   | (Symbol ";") :: tl -> Some (Empty, tl)
