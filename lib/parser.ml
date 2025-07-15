@@ -192,26 +192,46 @@ and parse_args =  function
 | Some (tc, rest) -> Some (ArgsTable tc, rest)
 | None -> None
 
-and parse_functioncall l = match parse_prefixexp l with 
-| None -> None
-| Some (pe, (Symbol ":")::(Ident name)::rest) -> begin match parse_args rest with
-  | None -> None
-  | Some (ar,rest_out) -> Some (MethodCall (pe,name,ar), rest_out) end
-| Some (pe, rest) -> begin match parse_args rest with
-  | None -> None
-  | Some (ar,rest_out) -> Some (Call (pe,ar), rest_out) end
+and parse_functioncall l = 
+  match parse_prefixexp l with 
+  | Some (FunctionCall fc, rest) -> Some (fc,rest)
+  | _ -> None
 
 and parse_prefixexp = function
 | (Symbol "(")::tl -> 
   begin match parse_exp tl with
-  | Some (exp, (Symbol ")")::rest) -> Some (Parens exp,rest)
-  | _ -> failwith "')' exepted after a '( ...' "
+  | Some (exp, (Symbol ")")::rest) -> Some (Parens exp, rest)
+  | _ -> failwith "')' expected after '(' ..."
   end
-| l -> match parse_var l with
-| Some (var, rest) -> Some (Var var,rest) 
-| None -> match parse_functioncall l with
-| Some (fc, rest) -> Some (FunctionCall fc, rest)
-| None -> None
+| (Ident s)::tl ->
+  let rec aux prev = function
+    | (Symbol "[")::exp_tl -> 
+        begin match parse_exp exp_tl with 
+        | Some (exp, (Symbol "]")::rest) -> aux (Var (Indexed (prev, exp))) rest
+        | _ -> failwith "']' expected after '['"
+        end
+    | (Symbol ".")::name_tl ->
+        begin match name_tl with 
+        | (Ident n)::rest -> aux (Var (Field (prev, n))) rest
+        | _ -> failwith "name expected after '.'"
+        end
+    | (Symbol ":")::name_tl -> 
+        begin match name_tl with
+        | (Ident name)::args_tl ->
+            begin match parse_args args_tl with
+            | Some (ar, rest_out) -> aux (FunctionCall (MethodCall (prev, name, ar))) rest_out
+            | None -> failwith "args expected after method name"
+            end
+        | _ -> failwith "method name expected after ':'"
+        end
+    | rest ->
+        begin match parse_args rest with
+        | Some (ar, rest_out) -> aux (FunctionCall (Call (prev, ar))) rest_out
+        | None -> (prev, rest)
+        end
+    in let final_exp, rest = aux (Var (Name s)) tl in
+  Some (final_exp, rest)
+| _ -> None
 
 and parse_exp l =
   match (
@@ -271,15 +291,8 @@ end
 | (Ident s)::tl -> Some (NameList (s,[]), tl)
 | _ -> None
 
-and parse_var = function
-| (Ident s)::tl -> Some (Name s,tl)
-| l -> match parse_prefixexp l with
-| Some (pe,(Symbol ".")::(Ident name)::rest) -> Some (Field (pe,name), rest)
-| Some (pe,(Symbol "[")::exp_tl) -> 
-  begin match parse_exp exp_tl with 
-  | Some (exp, (Symbol "]")::rest_out) -> Some (Indexed (pe,exp), rest_out)
-  | _ -> failwith "']' exepted after '['" 
-  end
+and parse_var l = match parse_prefixexp l with 
+| Some (Var v, rest) -> Some (v, rest)
 | _ -> None
 
 and parse_varlist l = match parse_var l with
