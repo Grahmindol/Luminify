@@ -91,6 +91,7 @@ in let rec refine  = function
       let _start = "["^(String.make c '=')^"[" in 
       let _end = "]"^(String.make c '=')^"]" in 
       collect_string _start _end refine "" t
+    | (0,_) -> (Symbol "[") :: refine tl
     | (c, t) -> (UnIdentified ("["^(String.make c '='))) :: refine t end
 
     
