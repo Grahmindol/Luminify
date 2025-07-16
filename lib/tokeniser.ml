@@ -37,12 +37,24 @@ let rec count_equals count = function
   | (Symbol "=")::t -> count_equals (count + 1) t
   | _ as t -> (count,t)
 
+let rec count_backslashes s i count =
+  if i < 0 then count
+  else if s.[i] = '\\' then count_backslashes s (i - 1) (count + 1)
+  else count
+
 let rec collect_string _start _end f acc tokens =
   match tokens with
   | (Symbol s)::t when s = String.make 1 _end.[0] ->
       if String.length _end < 2 then
-        (* Simple string end *)
-        StringStart _start :: String acc :: StringEnd _end :: f t
+        let len_acc = String.length acc in
+        let backslash_count = if len_acc = 0 then 0
+          else count_backslashes acc (len_acc - 1) 0
+        in if backslash_count mod 2 = 0 then
+          (* Not escaped → valid end *)
+          StringStart _start :: String acc :: StringEnd _end :: f t
+        else
+          (* Escaped → continue *)
+          collect_string _start _end f (acc ^ s) t
       else
         let (c, rest) = count_equals 0 t in
         if c = (String.length _end - 2) then

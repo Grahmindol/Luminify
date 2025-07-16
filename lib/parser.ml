@@ -677,6 +677,7 @@ and unparse_block = function
 
 and unparse_chunk c = 
   let rec add_important_space = function
+  | (StringStart a)::(String b)::(StringEnd c)::tl -> (StringStart a)::(String b)::(StringEnd c)::(add_important_space tl)
   | a::b::tl when 
       (let s = token_to_string a in is_latin_or_underscore (s.[String.length s - 1]))
     &&(let s = token_to_string b in is_latin_or_underscore (s.[0]))
