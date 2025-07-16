@@ -1,4 +1,5 @@
 (* tokeniser.ml *)
+open Utils
 
 type token = 
   | Whitespace of string (* Spaces, newlines, tabs, and carriage returns *)
@@ -31,47 +32,6 @@ let token_to_string = function
   | VarArg -> "..."
   | LabelStart
   | LabelEnd -> "::"
-
-
-let is_whitespace = function
-  | ' ' | '\n' | '\t' | '\r' -> true
-  | _ -> false
-
-let is_symbol = function
-  | '"' | '\''
-  | ',' | '{' | '}' | '[' | ']' | '(' | ')' | ';' | '.' | ':' | '='
-  | '~' | '&' | '|' | '#' | '>' | '<' 
-  | '+' | '-' | '*' | '/' | '^' | '%' -> true
-  | _ -> false
-
-let is_keyword = function 
-  | "break" | "do" | "else" | "elseif" | "end"
-  | "for" | "function" | "goto" | "if" | "in"
-  | "local" | "repeat" | "return"
-  | "then" | "until" | "while" -> true
-  | _ -> false
-
-let is_value = function
-  | "false" | "nil" | "true" -> true
-  | _ -> false
-
-let is_charop = function
-  | "~" | "&" | "|" | "#" | ">" | "<" 
-  | "+" | "-" | "*" | "/" | "^" | "%" -> true
-  | _ -> false
-
-let is_lua_numeral (s : string) : bool =
-  let re_decimal_int = Str.regexp "^[0-9]+$" in
-  let re_decimal_float = Str.regexp "^\\([0-9]+\\.[0-9]*\\|[0-9]*\\.[0-9]+\\)\\([eE][-+]?[0-9]+\\)?$" in
-  let re_decimal_exp = Str.regexp "^[0-9]+[eE][-+]?[0-9]+$" in
-  let re_hex = Str.regexp "^0[xX][0-9a-fA-F]+$" in
-  let re_hex_float = Str.regexp "^0[xX][0-9a-fA-F]+\\.[0-9a-fA-F]*\\([pP][-+]?[0-9]+\\)?$\\|^0[xX][0-9a-fA-F]+[pP][-+]?[0-9]+$\\|^0[xX]\\.[0-9a-fA-F]+[pP][-+]?[0-9]+$" in
-  Str.string_match re_decimal_int s 0
-  || Str.string_match re_decimal_float s 0
-  || Str.string_match re_decimal_exp s 0
-  || Str.string_match re_hex s 0
-  || Str.string_match re_hex_float s 0
-
 
 let rec count_equals count = function
   | (Symbol "=")::t -> count_equals (count + 1) t
@@ -176,13 +136,6 @@ in str |> String.to_seq |> List.of_seq |> (coarse_split "") |> refine |> finish;
 let rec untokenise = function
 | hd::tl -> token_to_string hd ^ (untokenise tl)
 | [] -> "";;
-
-let is_latin_or_underscore c =
-  (c >= 'a' && c <= 'z')
-  || (c >= 'A' && c <= 'Z')
-  || (c = '_')
-  || (c >= '0' && c <= '9');;
-
 
 let rec filter_useless_tokens = function
   | a::(Comment _)::(Comment _)::tl

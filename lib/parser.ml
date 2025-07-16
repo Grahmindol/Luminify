@@ -1,5 +1,6 @@
 (* parser.ml *)
 open Tokeniser
+open Utils
 
 type name = string
 type numeral = float
@@ -495,11 +496,195 @@ and parse_chunk t =
   | hd::tl -> hd::(rem_white_space tl)
   | [] -> []
   in t |> rem_white_space |> parse_block;;
+
+(*--------------- unparser ---------------*)
+
+let is_name s =
+  let len = String.length s in
+     len <> 0 
+  && (s.[0] < '0' || s.[0] > '9') 
+  && not (is_keyword s || is_value s)
+  && let rec check i = i >= len || (is_latin_or_underscore s.[i] && check (i + 1))
+     in check 0
+
+let unparse_unop = function
+| Neg -> [Operator "-"]
+| Not -> [Operator "not"]
+| Len -> [Operator "#"]
+| Bnot -> [Operator "~"]
+
+let unparse_binop = function
+| Add -> [Operator "+"]
+| Sub -> [Operator "-"]
+| Mul -> [Operator "*"]
+| Div -> [Operator "/"]
+| FloorDiv -> [Operator "//"]
+| Pow -> [Operator "^"]
+| Mod -> [Operator "%"]
+| Band -> [Operator "&"]
+| Bxor -> [Operator "~"]
+| Bor -> [Operator "|"]
+| Shr -> [Operator ">>"]
+| Shl -> [Operator "<<"]
+| Concat -> [Operator ".."]
+| Lt -> [Operator "<"]
+| Le -> [Operator "<="]
+| Gt -> [Operator ">"]
+| Ge -> [Operator ">="]
+| Eq -> [Operator "=="]
+| Ne -> [Operator "~="]
+| And -> [Operator "and"]
+| Or -> [Operator "or"]
+
+let rec unparse_field = function
+| FieldExp (k,v) -> (Symbol "[")::(unparse_exp k)@(Symbol "]")::(Symbol "=")::(unparse_exp v)
+| FieldName (n,v) -> (Ident n)::(Symbol "=")::(unparse_exp v)
+| FieldSimple e -> unparse_exp e
+
+and unparse_tableconstructor = function
+| TableConstructor Some (f,sfl, _) -> 
+  (Symbol "{")
+  ::(unparse_field f)
+  @(List.concat (List.map (fun (_,f) -> (Symbol ",")::(unparse_field f)) sfl))
+  @ [(Symbol "}")]
+| TableConstructor None -> [(Symbol "{");(Symbol "}")]
+
+and unparse_parlist = function
+| Parlist (nl, false) -> unparse_namelist nl
+| Parlist (nl, true) -> (unparse_namelist nl)@[(Symbol ",");VarArg]
+| ParEllipsis -> [VarArg]
+
+and unparse_funcbody = function
+| FuncBody (None, bl) -> (Symbol "(")::(Symbol ")")::(unparse_block bl)@[Keyword "end"]
+| FuncBody (Some pa, bl) -> (Symbol "(")::(unparse_parlist pa)@(Symbol ")")::(unparse_block bl)@[Keyword "end"]
+
+and unparse_functiondef = function
+| FunctionDef fb -> (Keyword "function")::(unparse_funcbody fb)
+
+and unparse_args = function
+| ArgsExpList None -> [(Symbol "(");(Symbol ")")]
+| ArgsExpList (Some (ExpList (LiteralString s,[]))) -> unparse_exp (LiteralString s)
+| ArgsExpList (Some (ExpList (ExpTableConstructor tc,[]))) -> unparse_tableconstructor tc
+| ArgsExpList (Some el) -> (Symbol "(")::(unparse_explist el)@[(Symbol ")")]
+| ArgsTable tc -> unparse_tableconstructor tc
+| ArgsString s -> unparse_exp (LiteralString s)
+
+and unparse_functioncall = function
+| Call (pe,ar) -> (unparse_prefixexp pe)@(unparse_args ar)
+| MethodCall (pe, na, ar) -> (unparse_prefixexp pe)@[(Symbol ":");(Ident na)]@(unparse_args ar)
+
+and unparse_prefixexp = function
+| Var v -> unparse_var v
+| FunctionCall fc -> unparse_functioncall fc
+| Parens ex ->  (Symbol "(")::(unparse_exp ex)@[(Symbol ")")]
+
+and unparse_exp = function
+| Nil -> [(Value "nil")]
+| False -> [(Value "false")]
+| True -> [(Value "true")]
+| Numeral n -> [(Number n)]
+| LiteralString s -> 
+  if not (String.contains s '\'') then
+    [StringStart "'"; String s; StringEnd "'"]
+  else if not (String.contains s '"') then
+    [StringStart "\""; String s; StringEnd "\""]
+  else 
+      let string_contains_sub s sub =
+        let len_s = String.length s in
+        let len_sub = String.length sub in
+        let rec aux i =
+          if i + len_sub > len_s then false
+          else if String.sub s i len_sub = sub then true
+          else aux (i + 1)
+        in aux 0
+      in let find_smallest_closing s =
+        let rec aux n =
+        let opening = "[" ^ String.make n '=' ^ "[" in
+        let closing = "]" ^ String.make n '=' ^ "]" in
+        if string_contains_sub s closing then
+          aux (n + 1)
+        else
+          (opening,closing)
+        in aux 0
+      in let o,c = find_smallest_closing s
+    in [StringStart o; String s; StringEnd c]
+| ExpEllipsis -> [VarArg]
+| ExpFunctionDef fd -> unparse_functiondef fd
+| PrefixExp pe -> unparse_prefixexp pe
+| ExpTableConstructor tc -> unparse_tableconstructor tc
+| BinOp (a, bi, b) -> (unparse_exp a)@(unparse_binop bi)@(unparse_exp b)
+| UnOp (un,a) -> (unparse_unop un)@(unparse_exp a)
+
+and unparse_explist = function
+| ExpList (e, []) -> unparse_exp e
+| ExpList (e, hd::tl) -> (unparse_exp e)@(Symbol ",")::(unparse_explist (ExpList (hd,tl)))
+
+and unparse_namelist = function
+| NameList (n, []) -> [Ident n]
+| NameList (n, hd::tl) -> (Ident n)::(Symbol ",")::(unparse_namelist (NameList (hd,tl)))
+
+and unparse_var = function
+| Name n -> [Ident n]
+| Indexed (pe, LiteralString s) when is_name s -> (unparse_prefixexp pe)@[(Symbol ".");(Ident s)]
+| Indexed (pe,ex) -> (unparse_prefixexp pe)@(Symbol "[")::(unparse_exp ex)@[(Symbol "]")]
+| Field (pe,n) -> (unparse_prefixexp pe)@[(Symbol ".");(Ident n)]
+
+and unparse_varlist = function
+| VarList (v, []) -> unparse_var v
+| VarList (v, hd::tl) -> (unparse_var v)@(Symbol ",")::(unparse_varlist (VarList (hd,tl)))
+
+and unparse_funcname = function
+| FuncName (n, [], None) -> [Ident n]
+| FuncName (n, [], Some m) -> [(Ident n);(Symbol ":");(Ident m)]
+| FuncName (n, hd::tl, m) -> (Ident n)::(Symbol ".")::(unparse_funcname (FuncName (hd, tl, m)))
+
+and unparse_label = function
+| Label l -> [LabelStart;(Ident l);LabelEnd]
+
+and unparse_retstat = function
+| RetStat (None, _) -> [Keyword "return"]
+| RetStat (Some el, _) -> (Keyword "return")::(unparse_explist el) 
+
+and unparse_stat = function
+| Empty -> []
+| Assignment (vl,el) -> (unparse_varlist vl)@(Symbol "=")::(unparse_explist el)
+| FunctionCallStat fc -> unparse_functioncall fc
+| LabelStat l -> unparse_label l
+| Break -> [Keyword "break"]
+| Goto n -> [Keyword "goto"; Ident n]
+| Do bl -> (Keyword "do")::(unparse_block bl)@[(Keyword "end")]
+| While (exp,bl) -> (Keyword "while")::(unparse_exp exp)@(Keyword "do")::(unparse_block bl)@[(Keyword "end")]
+| Repeat (bl, exp) -> (Keyword "repeat")::(unparse_block bl)@(Keyword "until")::(unparse_exp exp)
+| If (e,b, ebl, el) -> (Keyword "if")::(unparse_exp e)@(Keyword "then")::(unparse_block b)@
+  (let rec aux = function
+  | (e,b)::tl -> (Keyword "elseif")::(unparse_exp e)@(Keyword "then")::(unparse_block b)@(aux tl)
+  | [] -> match el with
+  | Some bl -> (Keyword "else")::(unparse_block bl)@[(Keyword "end")]
+  | None -> [Keyword "end"]
+  in aux ebl)
+| ForNum (n,a,b,c,bl) -> (Keyword "for")::(Ident n)::(Symbol "=")::(unparse_exp a)@(Symbol ",")::(unparse_exp b)@
+  (match c with Some e -> (Symbol ",")::(unparse_exp e) | _ -> [])@(Keyword "do")::(unparse_block bl)@[(Keyword "end")]
+| ForIn (nl, el, bl) -> (Keyword "for")::(unparse_namelist nl)@(Keyword "in")::(unparse_explist el)@(Keyword "do")::(unparse_block bl)@[(Keyword "end")]
+| Function (fn,fb) -> (Keyword "function")::(unparse_funcname fn)@(unparse_funcbody fb)
+| LocalFunction (n,fb) -> (Keyword "local")::(Keyword "function")::(Ident n)::(unparse_funcbody fb)
+| LocalAssign (nl, Some el) -> (Keyword "local")::(unparse_namelist nl)@(Keyword "=")::(unparse_explist el)
+| LocalAssign (nl, None) -> (Keyword "local")::(unparse_namelist nl)
+
+and unparse_block = function
+| [], None -> []
+| [], Some r -> unparse_retstat r
+| hd::tl, r -> (unparse_stat hd)@(unparse_block (tl,r))
+
+and unparse_chunk c = 
+  let rec add_important_space = function
+  | a::b::tl when 
+      (let s = token_to_string a in is_latin_or_underscore (s.[String.length s - 1]))
+    &&(let s = token_to_string b in is_latin_or_underscore (s.[0]))
+  -> a::(Whitespace " ")::(add_important_space (b::tl))
+  | hd::tl -> hd::(add_important_space tl)
+  | [] -> []
+in c |> unparse_block |> add_important_space
   
 
-let parse intput = 
-  let tokens = Tokeniser.filter_useless_tokens (Tokeniser.tokenise intput) in
-  ignore tokens;
-  print_endline (Tokeniser.untokenise tokens);
-  ([], None );;
-let unparse _ = "hello world !!!";;
+let parse i = let c,_ = parse_chunk (tokenise i) in c;;
+let unparse c = untokenise (unparse_chunk c);;
